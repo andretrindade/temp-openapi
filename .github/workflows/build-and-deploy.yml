@@ -1,0 +1,68 @@
+
+name: Build
+on:
+  push:
+    branches:
+      - "**"
+      - "!release-*"
+      - "!main"
+  pull_request_target:
+    types:
+      - closed
+    branches:
+      - "main"
+      - "release-*"
+jobs:
+  build:  
+    env:
+      ruby-version: 2.5
+      enable-openapi-integration: ${{ github.repository ==  'Sensedia/draft-openapi' &&  startsWith(github.ref_name,'release-')}}
+    name: Build Github pages 
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: sudo apt-get purge ruby 
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.ruby-version }}
+      - uses: actions/setup-node@v1
+        with:
+          node-version: '12'
+      - uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+      - run: npm install -g widdershins
+      - run: npm install -g @apidevtools/swagger-cli
+
+      - name: Set Github user data
+        id: githubData
+        run: |
+          echo "::set-output name=git_user_name::$(git --no-pager log --format=format:'%an' -n 1)"
+          echo "::set-output name=git_user_email::$(git --no-pager log --format=format:'%ae' -n 1)"
+          echo "::set-output name=git_commit_message::$(git --no-pager log --format=format:'%B' -n 1)" 
+      - name: Sensedia/openapi Integration
+        if: ${{ env.enable-openapi-integration }}
+        run: |
+          cd automation-scripts
+          bash git-repository-integration.sh "${{ steps.githubData.outputs.git_user_email }}"\
+           "${{ steps.githubData.outputs.git_user_name }}"\
+           "${{ secrets.AREADEV_INTEGRATION }}"\
+           "${{ github.ref_name }}"\
+           "openapi"\
+           "${{ steps.githubData.outputs.git_commit_message }}"
+  deploy:
+    if: github.event.pull_request.merged == true
+    env:
+       enable-deploy: ${{ (github.repository !=  'Sensedia/draft-openapi' && github.ref_name == 'main')}}
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Validação de deploy após pull request closed merged" 
+      - name: Deploy
+        if: env.enable-deploy == true
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: .
